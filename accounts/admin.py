@@ -1,6 +1,26 @@
 from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import Role, UserProfile
+from .models import Role, User, UserProfile
+
+
+@admin.register(User)
+class UserAdmin(DjangoUserAdmin):
+    fieldsets = DjangoUserAdmin.fieldsets + (
+        ("Mina Carolina", {"fields": ("dni", "phone", "deleted_at")}),
+        ("Auditoria", {"fields": ("created_at", "updated_at")}),
+    )
+    readonly_fields = ("created_at", "updated_at")
+    list_display = (
+        "username",
+        "email",
+        "first_name",
+        "last_name",
+        "dni",
+        "is_staff",
+        "is_active",
+    )
+    search_fields = ("username", "email", "first_name", "last_name", "dni")
 
 
 @admin.register(Role)
