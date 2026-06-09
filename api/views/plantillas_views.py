@@ -76,10 +76,6 @@ class PlantillasAsignadasView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        auth = JWTAuthentication()
-        res = auth.authenticate(request)
-        print("JWT authenticate =>", res)
-
         since = request.query_params.get("since")
         data = obtener_plantillas_asignadas(request.user, since)
 

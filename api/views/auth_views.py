@@ -1,4 +1,3 @@
-from django.contrib.auth import authenticate
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -7,6 +6,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.serializers.auth_serializers import LoginSerializer
 from api.services.auth_service import AuthService
+
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
@@ -17,21 +17,19 @@ def login_view(request):
     username = serializer.validated_data["username"]
     password = serializer.validated_data["password"]
 
-    print("LOGIN:", username)
-    print("Passw:", password)
-
     try:
         result = AuthService().login(username, password)
-    except Exception as e:
-        print("AuthService EX:", repr(e))
+    except Exception:
         return Response({"error": "Error interno de autenticación"}, status=500)
 
-    print("RESULT:", bool(result))
-
     if not result:
-        return Response({"error": "Credenciales inválidas"}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response(
+            {"error": "Credenciales inválidas"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
 
     return Response(result, status=status.HTTP_200_OK)
+
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
@@ -41,7 +39,7 @@ def refresh_view(request):
     if not refresh_token:
         return Response(
             {"error": "refresh requerido"},
-            status=status.HTTP_400_BAD_REQUEST
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     try:
@@ -52,5 +50,5 @@ def refresh_view(request):
     except Exception:
         return Response(
             {"error": "refresh inválido o expirado"},
-            status=status.HTTP_401_UNAUTHORIZED
+            status=status.HTTP_401_UNAUTHORIZED,
         )
