@@ -90,6 +90,16 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt",
+    # New managed apps for Cartillas Operaciones Mina.
+    "core.apps.CoreConfig",
+    "accounts.apps.AccountsConfig",
+    "auth_api.apps.AuthApiConfig",
+    "catalogos.apps.CatalogosConfig",
+    "cartillas.apps.CartillasConfig",
+    "mina.apps.MinaConfig",
+    "sync.apps.SyncConfig",
+    "attachments.apps.AttachmentsConfig",
+    "reports.apps.ReportsConfig",
     # Legacy apps kept temporarily as reference while the new backend is built.
     "user.apps.UserConfig",
     "api",
