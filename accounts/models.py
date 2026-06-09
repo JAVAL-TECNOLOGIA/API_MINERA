@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.db import models
-from django.db.models import Q
 
 from core.models import AuditModel
 
@@ -33,13 +32,6 @@ class User(AbstractUser):
             models.Index(fields=["dni"]),
             models.Index(fields=["is_active"]),
             models.Index(fields=["updated_at"]),
-        ]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["dni"],
-                condition=Q(dni__isnull=False) & ~Q(dni=""),
-                name="uq_accounts_user_dni_not_empty",
-            ),
         ]
 
     def __str__(self) -> str:

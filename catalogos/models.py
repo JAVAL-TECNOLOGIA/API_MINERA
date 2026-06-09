@@ -1,5 +1,4 @@
 from django.db import models
-from django.db.models import Q
 
 from core.models import AuditModel
 
@@ -103,18 +102,6 @@ class Trabajador(AuditModel):
             models.Index(fields=["dni"]),
             models.Index(fields=["is_active"]),
             models.Index(fields=["updated_at"]),
-        ]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["codigo"],
-                condition=Q(codigo__isnull=False) & ~Q(codigo=""),
-                name="uq_trabajador_codigo_not_null",
-            ),
-            models.UniqueConstraint(
-                fields=["dni"],
-                condition=Q(dni__isnull=False) & ~Q(dni=""),
-                name="uq_trabajador_dni_not_null",
-            ),
         ]
 
     def __str__(self) -> str:

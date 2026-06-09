@@ -121,8 +121,4 @@ class Migration(migrations.Migration):
             model_name='user',
             index=models.Index(fields=['updated_at'], name='accounts_us_updated_ad373a_idx'),
         ),
-        migrations.AddConstraint(
-            model_name='user',
-            constraint=models.UniqueConstraint(condition=models.Q(('dni__isnull', False), models.Q(('dni', ''), _negated=True)), fields=('dni',), name='uq_accounts_user_dni_not_empty'),
-        ),
     ]

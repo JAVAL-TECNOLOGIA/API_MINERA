@@ -2,13 +2,9 @@ import json
 import os
 from datetime import time
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
-
-from accounts.models import Role, UserProfile
-from catalogos.models import Area, Clima, Producto, Turno, UnidadMedida
-from cartillas.models import TipoCartilla
+from django.db import connection
 
 
 ROLES = [
@@ -129,68 +125,125 @@ class Command(BaseCommand):
             self._print_dry_run(options)
             return
 
-        with transaction.atomic():
-            summary = {
-                "roles": self._seed_roles(),
-                "areas": self._seed_catalog(Area, AREAS),
-                "turnos": self._seed_turnos(),
-                "productos": self._seed_catalog(Producto, PRODUCTOS),
-                "unidades_medida": self._seed_catalog(UnidadMedida, UNIDADES_MEDIDA),
-                "climas": self._seed_catalog(Clima, CLIMAS),
-                "tipo_cartilla": self._seed_tipo_cartilla(),
-                "admin_user": self._seed_admin_user(options),
-            }
+        summary = {
+            "roles": self._seed_roles(),
+            "areas": self._seed_catalog("catalogos_area", AREAS),
+            "turnos": self._seed_turnos(),
+            "productos": self._seed_catalog("catalogos_producto", PRODUCTOS),
+            "unidades_medida": self._seed_catalog(
+                "catalogos_unidadmedida",
+                UNIDADES_MEDIDA,
+            ),
+            "climas": self._seed_catalog("catalogos_clima", CLIMAS),
+            "tipo_cartilla": self._seed_tipo_cartilla(),
+            "admin_user": self._seed_admin_user(options),
+        }
 
         self._print_summary(summary)
 
     def _seed_roles(self):
         result = {"created": 0, "updated": 0}
         for role in ROLES:
-            _, created = Role.objects.update_or_create(
-                code=role["code"],
-                defaults={
-                    "name": role["name"],
-                    "description": role["description"],
-                    "is_active": True,
-                },
+            existed = self._exists("accounts_role", "code", role["code"])
+            self._execute(
+                f"""
+                IF EXISTS (SELECT 1 FROM accounts_role WHERE code = {self._q(role["code"])})
+                    UPDATE accounts_role
+                    SET name = {self._q(role["name"])},
+                        description = {self._q(role["description"])},
+                        is_active = 1,
+                        updated_at = GETDATE()
+                    WHERE code = {self._q(role["code"])}
+                ELSE
+                    INSERT INTO accounts_role
+                        (created_at, updated_at, deleted_at, is_active, code, name, description)
+                    VALUES
+                        (GETDATE(), GETDATE(), NULL, 1, {self._q(role["code"])},
+                         {self._q(role["name"])}, {self._q(role["description"])})
+                """
             )
-            result["created" if created else "updated"] += 1
+            result["updated" if existed else "created"] += 1
         return result
 
-    def _seed_catalog(self, model, rows):
+    def _seed_catalog(self, table_name, rows):
         result = {"created": 0, "updated": 0}
         for row in rows:
-            _, created = model.objects.update_or_create(
-                codigo=row["codigo"],
-                defaults={**row, "is_active": True},
+            existed = self._exists(table_name, "codigo", row["codigo"])
+            self._execute(
+                f"""
+                IF EXISTS (SELECT 1 FROM {table_name} WHERE codigo = {self._q(row["codigo"])})
+                    UPDATE {table_name}
+                    SET nombre = {self._q(row["nombre"])},
+                        descripcion = {self._q(row["descripcion"])},
+                        is_active = 1,
+                        updated_at = GETDATE()
+                    WHERE codigo = {self._q(row["codigo"])}
+                ELSE
+                    INSERT INTO {table_name}
+                        (created_at, updated_at, deleted_at, is_active, codigo, nombre, descripcion)
+                    VALUES
+                        (GETDATE(), GETDATE(), NULL, 1, {self._q(row["codigo"])},
+                         {self._q(row["nombre"])}, {self._q(row["descripcion"])})
+                """
             )
-            result["created" if created else "updated"] += 1
+            result["updated" if existed else "created"] += 1
         return result
 
     def _seed_turnos(self):
         result = {"created": 0, "updated": 0}
         for row in TURNOS:
-            _, created = Turno.objects.update_or_create(
-                codigo=row["codigo"],
-                defaults={**row, "is_active": True},
+            existed = self._exists("catalogos_turno", "codigo", row["codigo"])
+            self._execute(
+                f"""
+                IF EXISTS (SELECT 1 FROM catalogos_turno WHERE codigo = {self._q(row["codigo"])})
+                    UPDATE catalogos_turno
+                    SET nombre = {self._q(row["nombre"])},
+                        hora_inicio = {self._time(row["hora_inicio"])},
+                        hora_fin = {self._time(row["hora_fin"])},
+                        cruza_medianoche = {self._bit(row["cruza_medianoche"])},
+                        is_active = 1,
+                        updated_at = GETDATE()
+                    WHERE codigo = {self._q(row["codigo"])}
+                ELSE
+                    INSERT INTO catalogos_turno
+                        (created_at, updated_at, deleted_at, is_active, codigo, nombre,
+                         hora_inicio, hora_fin, cruza_medianoche)
+                    VALUES
+                        (GETDATE(), GETDATE(), NULL, 1, {self._q(row["codigo"])},
+                         {self._q(row["nombre"])}, {self._time(row["hora_inicio"])},
+                         {self._time(row["hora_fin"])}, {self._bit(row["cruza_medianoche"])})
+                """
             )
-            result["created" if created else "updated"] += 1
+            result["updated" if existed else "created"] += 1
         return result
 
     def _seed_tipo_cartilla(self):
-        _, created = TipoCartilla.objects.update_or_create(
-            codigo="CARTILLA_OPERACION_MINA",
-            defaults={
-                "nombre": "Cartilla diaria de operacion mina",
-                "descripcion": (
-                    "Cartilla diaria/por turno para operaciones de mina subterranea"
-                ),
-                "version": 1,
-                "schema_json": json.dumps(CARTILLA_SCHEMA, ensure_ascii=False),
-                "is_active": True,
-            },
+        codigo = "CARTILLA_OPERACION_MINA"
+        nombre = "Cartilla diaria de operacion mina"
+        descripcion = "Cartilla diaria/por turno para operaciones de mina subterranea"
+        schema_json = json.dumps(CARTILLA_SCHEMA, ensure_ascii=False)
+        existed = self._exists("cartillas_tipocartilla", "codigo", codigo)
+        self._execute(
+            f"""
+            IF EXISTS (SELECT 1 FROM cartillas_tipocartilla WHERE codigo = {self._q(codigo)})
+                UPDATE cartillas_tipocartilla
+                SET nombre = {self._q(nombre)},
+                    descripcion = {self._q(descripcion)},
+                    version = 1,
+                    schema_json = {self._q(schema_json)},
+                    is_active = 1,
+                    updated_at = GETDATE()
+                WHERE codigo = {self._q(codigo)}
+            ELSE
+                INSERT INTO cartillas_tipocartilla
+                    (created_at, updated_at, deleted_at, is_active, codigo,
+                     nombre, descripcion, version, schema_json)
+                VALUES
+                    (GETDATE(), GETDATE(), NULL, 1, {self._q(codigo)},
+                     {self._q(nombre)}, {self._q(descripcion)}, 1, {self._q(schema_json)})
+            """
         )
-        return {"created": int(created), "updated": int(not created)}
+        return {"created": int(not existed), "updated": int(existed)}
 
     def _seed_admin_user(self, options):
         username = options["admin_username"].strip()
@@ -206,54 +259,97 @@ class Command(BaseCommand):
                 "Para crear admin inicial debe indicar admin username y password."
             )
 
-        User = get_user_model()
-        user, created = User.objects.get_or_create(
-            username=username,
-            defaults={
-                "email": email,
-                "dni": dni or None,
-                "is_staff": True,
-                "is_superuser": True,
-                "is_active": True,
-            },
+        existed = self._exists("accounts_user", "username", username)
+        password_hash = make_password(password)
+        dni_sql = self._q(dni) if dni else "NULL"
+
+        self._execute(
+            f"""
+            IF EXISTS (SELECT 1 FROM accounts_user WHERE username = {self._q(username)})
+                UPDATE accounts_user
+                SET email = {self._q(email)},
+                    dni = {dni_sql},
+                    is_staff = 1,
+                    is_superuser = 1,
+                    is_active = 1,
+                    updated_at = GETDATE()
+                WHERE username = {self._q(username)}
+            ELSE
+                INSERT INTO accounts_user
+                    (password, last_login, is_superuser, username, first_name, last_name,
+                     email, is_staff, is_active, date_joined, dni, phone,
+                     created_at, updated_at, deleted_at)
+                VALUES
+                    ({self._q(password_hash)}, NULL, 1, {self._q(username)}, '', '',
+                     {self._q(email)}, 1, 1, GETDATE(), {dni_sql}, '',
+                     GETDATE(), GETDATE(), NULL)
+            """
         )
 
-        changed_fields = []
-        for field, value in {
-            "email": email,
-            "dni": dni or None,
-            "is_staff": True,
-            "is_superuser": True,
-            "is_active": True,
-        }.items():
-            if getattr(user, field) != value:
-                setattr(user, field, value)
-                changed_fields.append(field)
+        profile_existed = self._admin_profile_exists(username)
+        self._execute(
+            f"""
+            DECLARE @user_id bigint = (
+                SELECT TOP 1 id FROM accounts_user WHERE username = {self._q(username)}
+            );
+            DECLARE @role_id bigint = (
+                SELECT TOP 1 id FROM accounts_role WHERE code = 'admin'
+            );
 
-        if created:
-            user.set_password(password)
-            changed_fields.append("password")
-
-        if changed_fields:
-            user.save()
-
-        admin_role = Role.objects.get(code="admin")
-        profile, profile_created = UserProfile.objects.update_or_create(
-            user=user,
-            defaults={
-                "role": admin_role,
-                "is_active": True,
-            },
+            IF EXISTS (SELECT 1 FROM accounts_userprofile WHERE user_id = @user_id)
+                UPDATE accounts_userprofile
+                SET role_id = @role_id,
+                    is_active = 1,
+                    updated_at = GETDATE()
+                WHERE user_id = @user_id
+            ELSE
+                INSERT INTO accounts_userprofile
+                    (created_at, updated_at, deleted_at, is_active,
+                     user_id, role_id, empresa_id)
+                VALUES
+                    (GETDATE(), GETDATE(), NULL, 1, @user_id, @role_id, NULL)
+            """
         )
 
         return {
             "skipped": False,
-            "created": created,
-            "updated": bool(changed_fields) and not created,
-            "profile_created": profile_created,
-            "profile_id": profile.id,
-            "username": user.username,
+            "created": not existed,
+            "updated": existed,
+            "profile_created": not profile_existed,
+            "username": username,
         }
+
+    def _exists(self, table_name, field_name, value):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT COUNT(*) FROM {table_name} WHERE {field_name} = {self._q(value)}"
+            )
+            return cursor.fetchone()[0] > 0
+
+    def _admin_profile_exists(self, username):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM accounts_userprofile p
+                INNER JOIN accounts_user u ON u.id = p.user_id
+                WHERE u.username = {self._q(username)}
+                """
+            )
+            return cursor.fetchone()[0] > 0
+
+    def _execute(self, sql):
+        with connection.cursor() as cursor:
+            cursor.execute(sql)
+
+    def _q(self, value):
+        return "N'" + str(value).replace("'", "''") + "'"
+
+    def _time(self, value):
+        return "'" + value.strftime("%H:%M:%S") + "'"
+
+    def _bit(self, value):
+        return "1" if value else "0"
 
     def _print_dry_run(self, options):
         self.stdout.write(self.style.WARNING("DRY RUN: no se escribira en la base."))

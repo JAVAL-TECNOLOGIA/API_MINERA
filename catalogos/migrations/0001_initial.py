@@ -389,14 +389,6 @@ class Migration(migrations.Migration):
             model_name='trabajador',
             index=models.Index(fields=['updated_at'], name='catalogos_t_updated_e27bb4_idx'),
         ),
-        migrations.AddConstraint(
-            model_name='trabajador',
-            constraint=models.UniqueConstraint(condition=models.Q(('codigo__isnull', False), models.Q(('codigo', ''), _negated=True)), fields=('codigo',), name='uq_trabajador_codigo_not_null'),
-        ),
-        migrations.AddConstraint(
-            model_name='trabajador',
-            constraint=models.UniqueConstraint(condition=models.Q(('dni__isnull', False), models.Q(('dni', ''), _negated=True)), fields=('dni',), name='uq_trabajador_dni_not_null'),
-        ),
         migrations.AddIndex(
             model_name='laborfrente',
             index=models.Index(fields=['codigo'], name='catalogos_l_codigo_9ac3d5_idx'),

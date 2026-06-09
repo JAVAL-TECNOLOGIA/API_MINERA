@@ -106,6 +106,9 @@ def _database_config() -> dict:
     if extra_params:
         options["extra_params"] = extra_params
 
+    if _env_bool("DB_HOST_IS_SERVER", False):
+        options["host_is_server"] = True
+
     if options:
         config["OPTIONS"] = options
 
