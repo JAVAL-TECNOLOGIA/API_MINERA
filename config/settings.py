@@ -45,6 +45,32 @@ def _env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _odbc_extra_params() -> str:
+    params = []
+
+    encrypt = _env("DB_ENCRYPT")
+    if encrypt:
+        params.append(f"Encrypt={encrypt}")
+
+    trust_server_certificate = _env("DB_TRUST_SERVER_CERTIFICATE")
+    if trust_server_certificate:
+        params.append(f"TrustServerCertificate={trust_server_certificate}")
+
+    mars_connection = _env("DB_MARS_CONNECTION")
+    if mars_connection:
+        params.append(f"MARS_Connection={mars_connection}")
+
+    connection_timeout = _env("DB_CONNECTION_TIMEOUT")
+    if connection_timeout:
+        params.append(f"Connection Timeout={connection_timeout}")
+
+    extra_params = _env("DB_EXTRA_PARAMS")
+    if extra_params:
+        params.append(extra_params.strip(";"))
+
+    return ";".join(params)
+
+
 def _database_config() -> dict:
     engine = _env("DB_ENGINE", "mssql")
     name = _env("DB_NAME", "cartillas_operaciones_mina")
@@ -56,18 +82,32 @@ def _database_config() -> dict:
             "NAME": str(BASE_DIR / db_path),
         }
 
+    server_format = _env("DB_SERVER_FORMAT")
+    connection_timeout = _env_int("DB_CONNECTION_TIMEOUT", 0)
+
     config = {
         "ENGINE": engine,
         "NAME": name,
-        "HOST": _env("DB_HOST", "localhost"),
-        "PORT": _env("DB_PORT", "1433"),
+        "HOST": server_format or _env("DB_HOST", "localhost"),
+        "PORT": "" if server_format else _env("DB_PORT", "1433"),
         "USER": _env("DB_USER"),
         "PASSWORD": _env("DB_PASSWORD"),
     }
 
     driver = _env("DB_DRIVER", "ODBC Driver 17 for SQL Server")
+    options = {}
     if driver:
-        config["OPTIONS"] = {"driver": driver}
+        options["driver"] = driver
+
+    if connection_timeout:
+        options["connection_timeout"] = connection_timeout
+
+    extra_params = _odbc_extra_params()
+    if extra_params:
+        options["extra_params"] = extra_params
+
+    if options:
+        config["OPTIONS"] = options
 
     return config
 
