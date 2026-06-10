@@ -50,6 +50,12 @@ AREAS = [
 ]
 
 
+GUARDIAS = [
+    {"codigo": "A", "nombre": "Guardia A", "descripcion": "Guardia operativa A."},
+    {"codigo": "B", "nombre": "Guardia B", "descripcion": "Guardia operativa B."},
+]
+
+
 TURNOS = [
     {
         "codigo": "DIA",
@@ -128,6 +134,7 @@ class Command(BaseCommand):
         summary = {
             "roles": self._seed_roles(),
             "areas": self._seed_catalog("catalogos_area", AREAS),
+            "guardias": self._seed_catalog("catalogos_guardia", GUARDIAS),
             "turnos": self._seed_turnos(),
             "productos": self._seed_catalog("catalogos_producto", PRODUCTOS),
             "unidades_medida": self._seed_catalog(
@@ -355,6 +362,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING("DRY RUN: no se escribira en la base."))
         self.stdout.write(f"Roles: {len(ROLES)}")
         self.stdout.write(f"Areas: {len(AREAS)}")
+        self.stdout.write(f"Guardias: {len(GUARDIAS)}")
         self.stdout.write(f"Turnos: {len(TURNOS)}")
         self.stdout.write(f"Productos: {len(PRODUCTOS)}")
         self.stdout.write(f"Unidades de medida: {len(UNIDADES_MEDIDA)}")
