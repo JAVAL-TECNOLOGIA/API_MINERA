@@ -239,6 +239,7 @@ STATIC_URL = "static/"
 
 MEDIA_ROOT = BASE_DIR / _env("MEDIA_ROOT", "media")
 MEDIA_URL = _env("MEDIA_URL", "/media/")
+ATTACHMENT_MAX_UPLOAD_MB = _env_int("ATTACHMENT_MAX_UPLOAD_MB", 25)
 
 
 LOGS_DIR = BASE_DIR / "logs"

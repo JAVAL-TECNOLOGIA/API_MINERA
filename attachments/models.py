@@ -5,6 +5,18 @@ from core.models import SoftDeleteModel, TimeStampedModel
 
 
 class Attachment(TimeStampedModel, SoftDeleteModel):
+    TYPE_FOTO = "foto"
+    TYPE_FIRMA = "firma"
+    TYPE_DOCUMENTO = "documento"
+    TYPE_EVIDENCIA = "evidencia"
+
+    ATTACHMENT_TYPE_CHOICES = [
+        (TYPE_FOTO, "Foto"),
+        (TYPE_FIRMA, "Firma"),
+        (TYPE_DOCUMENTO, "Documento"),
+        (TYPE_EVIDENCIA, "Evidencia"),
+    ]
+
     cartilla = models.ForeignKey(
         "mina.CartillaOperacionMina",
         on_delete=models.CASCADE,
@@ -14,6 +26,11 @@ class Attachment(TimeStampedModel, SoftDeleteModel):
     module_key = models.CharField(max_length=100)
     row_key = models.CharField(max_length=64, blank=True)
     slot = models.PositiveIntegerField(blank=True, null=True)
+    attachment_type = models.CharField(
+        max_length=20,
+        choices=ATTACHMENT_TYPE_CHOICES,
+        default=TYPE_FOTO,
+    )
     file = models.FileField(upload_to="attachments/%Y/%m/%d/")
     original_name = models.CharField(max_length=255, blank=True)
     mime_type = models.CharField(max_length=100, blank=True)
