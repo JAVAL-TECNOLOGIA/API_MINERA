@@ -1,10 +1,13 @@
+from django.db import transaction
 from django.db.models import Count, Prefetch, Q
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+from auth_api.serializers import get_user_roles
 from attachments.models import Attachment
 
 from .models import (
@@ -18,6 +21,53 @@ from .models import (
     CartillaWorkflowLog,
 )
 from .serializers import CartillaMinaDetailSerializer, CartillaMinaListSerializer
+
+
+ACTION_SUBMIT = "submit"
+ACTION_OBSERVE = "observe"
+ACTION_APPROVE = "approve"
+ACTION_REJECT = "reject"
+ACTION_CLOSE = "close"
+
+
+WORKFLOW_ACTIONS = {
+    ACTION_SUBMIT: {
+        "to_state": CartillaOperacionMina.ESTADO_ENVIADO,
+        "from_states": {
+            CartillaOperacionMina.ESTADO_BORRADOR,
+            CartillaOperacionMina.ESTADO_OBSERVADO,
+        },
+        "requires_comment": False,
+        "permission": "submit",
+    },
+    ACTION_OBSERVE: {
+        "to_state": CartillaOperacionMina.ESTADO_OBSERVADO,
+        "from_states": {CartillaOperacionMina.ESTADO_ENVIADO},
+        "requires_comment": True,
+        "permission": "review",
+    },
+    ACTION_APPROVE: {
+        "to_state": CartillaOperacionMina.ESTADO_APROBADO,
+        "from_states": {CartillaOperacionMina.ESTADO_ENVIADO},
+        "requires_comment": False,
+        "permission": "review",
+    },
+    ACTION_REJECT: {
+        "to_state": CartillaOperacionMina.ESTADO_RECHAZADO,
+        "from_states": {
+            CartillaOperacionMina.ESTADO_ENVIADO,
+            CartillaOperacionMina.ESTADO_OBSERVADO,
+        },
+        "requires_comment": True,
+        "permission": "review",
+    },
+    ACTION_CLOSE: {
+        "to_state": CartillaOperacionMina.ESTADO_CERRADO,
+        "from_states": {CartillaOperacionMina.ESTADO_APROBADO},
+        "requires_comment": False,
+        "permission": "close",
+    },
+}
 
 
 @api_view(["GET"])
@@ -108,6 +158,40 @@ def _visible_cartillas(user):
     return queryset.filter(user=user)
 
 
+def _role_codes(user):
+    return set(get_user_roles(user))
+
+
+def _has_any_role(user, role_codes):
+    return bool(_role_codes(user) & set(role_codes))
+
+
+def _can_manage_all(user):
+    return user.is_staff or user.is_superuser or _has_any_role(user, ["admin"])
+
+
+def _can_review(user):
+    return _can_manage_all(user) or _has_any_role(user, ["supervisor", "revisor"])
+
+
+def _can_close(user):
+    return _can_review(user)
+
+
+def _can_see_for_workflow(user, cartilla):
+    return cartilla.user_id == user.id or _can_review(user)
+
+
+def _has_workflow_permission(user, cartilla, permission):
+    if permission == "submit":
+        return cartilla.user_id == user.id or _can_manage_all(user)
+    if permission == "review":
+        return _can_review(user)
+    if permission == "close":
+        return _can_close(user)
+    return False
+
+
 def _apply_filters(queryset, request):
     params = request.query_params
     date_filters = {
@@ -196,3 +280,104 @@ def cartilla_by_client_record(request, client_record_id):
         )
     serializer = CartillaMinaDetailSerializer(cartilla, context={"request": request})
     return Response(serializer.data)
+
+
+def _workflow_cartilla_response(cartilla_id, request):
+    cartilla = _base_cartilla_queryset().filter(pk=cartilla_id).first()
+    serializer = CartillaMinaListSerializer(cartilla, context={"request": request})
+    return Response(serializer.data)
+
+
+def _workflow_action(request, cartilla_id, action):
+    config = WORKFLOW_ACTIONS[action]
+    cartilla = CartillaOperacionMina.objects.filter(pk=cartilla_id).first()
+    if cartilla is None or not _can_see_for_workflow(request.user, cartilla):
+        return Response(
+            {"detail": "Cartilla no encontrada."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if cartilla.estado_workflow not in config["from_states"]:
+        return Response(
+            {
+                "detail": (
+                    f"Transicion invalida: {cartilla.estado_workflow} -> "
+                    f"{config['to_state']}."
+                ),
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not _has_workflow_permission(request.user, cartilla, config["permission"]):
+        return Response(
+            {"detail": "No tiene permiso para ejecutar esta accion."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    comment = (request.data.get("comment") or "").strip()
+    if config["requires_comment"] and not comment:
+        return Response(
+            {"comment": "Este campo es requerido."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    from_state = cartilla.estado_workflow
+    to_state = config["to_state"]
+    now = timezone.now()
+
+    with transaction.atomic():
+        cartilla.estado_workflow = to_state
+        update_fields = ["estado_workflow", "updated_at"]
+
+        if action == ACTION_SUBMIT:
+            cartilla.submitted_at = now
+            update_fields.append("submitted_at")
+        elif action in {ACTION_APPROVE, ACTION_REJECT}:
+            cartilla.reviewed_by = request.user
+            cartilla.reviewed_at = now
+            update_fields.extend(["reviewed_by", "reviewed_at"])
+        elif action == ACTION_CLOSE:
+            cartilla.closed_at = now
+            update_fields.append("closed_at")
+
+        cartilla.save(update_fields=update_fields)
+        CartillaWorkflowLog.objects.create(
+            cartilla=cartilla,
+            from_state=from_state,
+            to_state=to_state,
+            action=action,
+            comment=comment,
+            created_by=request.user,
+        )
+
+    return _workflow_cartilla_response(cartilla.pk, request)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def cartilla_submit(request, cartilla_id):
+    return _workflow_action(request, cartilla_id, ACTION_SUBMIT)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def cartilla_observe(request, cartilla_id):
+    return _workflow_action(request, cartilla_id, ACTION_OBSERVE)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def cartilla_approve(request, cartilla_id):
+    return _workflow_action(request, cartilla_id, ACTION_APPROVE)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def cartilla_reject(request, cartilla_id):
+    return _workflow_action(request, cartilla_id, ACTION_REJECT)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def cartilla_close(request, cartilla_id):
+    return _workflow_action(request, cartilla_id, ACTION_CLOSE)
