@@ -7,7 +7,6 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from auth_api.serializers import get_user_roles
 from attachments.models import Attachment
 
 from .models import (
@@ -20,54 +19,23 @@ from .models import (
     CartillaPersonal,
     CartillaWorkflowLog,
 )
-from .serializers import CartillaMinaDetailSerializer, CartillaMinaListSerializer
-
-
-ACTION_SUBMIT = "submit"
-ACTION_OBSERVE = "observe"
-ACTION_APPROVE = "approve"
-ACTION_REJECT = "reject"
-ACTION_CLOSE = "close"
-
-
-WORKFLOW_ACTIONS = {
-    ACTION_SUBMIT: {
-        "to_state": CartillaOperacionMina.ESTADO_ENVIADO,
-        "from_states": {
-            CartillaOperacionMina.ESTADO_BORRADOR,
-            CartillaOperacionMina.ESTADO_OBSERVADO,
-        },
-        "requires_comment": False,
-        "permission": "submit",
-    },
-    ACTION_OBSERVE: {
-        "to_state": CartillaOperacionMina.ESTADO_OBSERVADO,
-        "from_states": {CartillaOperacionMina.ESTADO_ENVIADO},
-        "requires_comment": True,
-        "permission": "review",
-    },
-    ACTION_APPROVE: {
-        "to_state": CartillaOperacionMina.ESTADO_APROBADO,
-        "from_states": {CartillaOperacionMina.ESTADO_ENVIADO},
-        "requires_comment": False,
-        "permission": "review",
-    },
-    ACTION_REJECT: {
-        "to_state": CartillaOperacionMina.ESTADO_RECHAZADO,
-        "from_states": {
-            CartillaOperacionMina.ESTADO_ENVIADO,
-            CartillaOperacionMina.ESTADO_OBSERVADO,
-        },
-        "requires_comment": True,
-        "permission": "review",
-    },
-    ACTION_CLOSE: {
-        "to_state": CartillaOperacionMina.ESTADO_CERRADO,
-        "from_states": {CartillaOperacionMina.ESTADO_APROBADO},
-        "requires_comment": False,
-        "permission": "close",
-    },
-}
+from .serializers import (
+    CartillaMinaDetailSerializer,
+    CartillaMinaListSerializer,
+    CartillaMinaRenderDataSerializer,
+    CartillaMinaSummarySerializer,
+)
+from .workflow import (
+    ACTION_APPROVE,
+    ACTION_CLOSE,
+    ACTION_OBSERVE,
+    ACTION_REJECT,
+    ACTION_SUBMIT,
+    WORKFLOW_ACTIONS,
+    can_review,
+    can_view_cartilla,
+    has_workflow_permission,
+)
 
 
 @api_view(["GET"])
@@ -153,43 +121,9 @@ def _base_cartilla_queryset():
 
 def _visible_cartillas(user):
     queryset = _base_cartilla_queryset()
-    if user.is_staff or user.is_superuser:
+    if can_review(user):
         return queryset
     return queryset.filter(user=user)
-
-
-def _role_codes(user):
-    return set(get_user_roles(user))
-
-
-def _has_any_role(user, role_codes):
-    return bool(_role_codes(user) & set(role_codes))
-
-
-def _can_manage_all(user):
-    return user.is_staff or user.is_superuser or _has_any_role(user, ["admin"])
-
-
-def _can_review(user):
-    return _can_manage_all(user) or _has_any_role(user, ["supervisor", "revisor"])
-
-
-def _can_close(user):
-    return _can_review(user)
-
-
-def _can_see_for_workflow(user, cartilla):
-    return cartilla.user_id == user.id or _can_review(user)
-
-
-def _has_workflow_permission(user, cartilla, permission):
-    if permission == "submit":
-        return cartilla.user_id == user.id or _can_manage_all(user)
-    if permission == "review":
-        return _can_review(user)
-    if permission == "close":
-        return _can_close(user)
-    return False
 
 
 def _apply_filters(queryset, request):
@@ -282,6 +216,32 @@ def cartilla_by_client_record(request, client_record_id):
     return Response(serializer.data)
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def cartilla_summary(request, cartilla_id):
+    cartilla = _visible_cartillas(request.user).filter(pk=cartilla_id).first()
+    if cartilla is None:
+        return Response(
+            {"detail": "Cartilla no encontrada."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    serializer = CartillaMinaSummarySerializer(cartilla, context={"request": request})
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def cartilla_render_data(request, cartilla_id):
+    cartilla = _visible_cartillas(request.user).filter(pk=cartilla_id).first()
+    if cartilla is None:
+        return Response(
+            {"detail": "Cartilla no encontrada."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    serializer = CartillaMinaRenderDataSerializer(cartilla, context={"request": request})
+    return Response(serializer.data)
+
+
 def _workflow_cartilla_response(cartilla_id, request):
     cartilla = _base_cartilla_queryset().filter(pk=cartilla_id).first()
     serializer = CartillaMinaListSerializer(cartilla, context={"request": request})
@@ -291,7 +251,7 @@ def _workflow_cartilla_response(cartilla_id, request):
 def _workflow_action(request, cartilla_id, action):
     config = WORKFLOW_ACTIONS[action]
     cartilla = CartillaOperacionMina.objects.filter(pk=cartilla_id).first()
-    if cartilla is None or not _can_see_for_workflow(request.user, cartilla):
+    if cartilla is None or not can_view_cartilla(cartilla, request.user):
         return Response(
             {"detail": "Cartilla no encontrada."},
             status=status.HTTP_404_NOT_FOUND,
@@ -308,7 +268,7 @@ def _workflow_action(request, cartilla_id, action):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    if not _has_workflow_permission(request.user, cartilla, config["permission"]):
+    if not has_workflow_permission(request.user, cartilla, config["permission"]):
         return Response(
             {"detail": "No tiene permiso para ejecutar esta accion."},
             status=status.HTTP_403_FORBIDDEN,

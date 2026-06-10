@@ -8,7 +8,9 @@ from .views import (
     cartilla_list,
     cartilla_observe,
     cartilla_reject,
+    cartilla_render_data,
     cartilla_submit,
+    cartilla_summary,
     module_status,
 )
 
@@ -17,6 +19,12 @@ urlpatterns = [
     path("", module_status, name="mina_status"),
     path("cartillas/", cartilla_list, name="mina_cartilla_list"),
     path("cartillas/<int:cartilla_id>/", cartilla_detail, name="mina_cartilla_detail"),
+    path("cartillas/<int:cartilla_id>/summary/", cartilla_summary, name="mina_cartilla_summary"),
+    path(
+        "cartillas/<int:cartilla_id>/render-data/",
+        cartilla_render_data,
+        name="mina_cartilla_render_data",
+    ),
     path("cartillas/<int:cartilla_id>/submit/", cartilla_submit, name="mina_cartilla_submit"),
     path("cartillas/<int:cartilla_id>/observe/", cartilla_observe, name="mina_cartilla_observe"),
     path("cartillas/<int:cartilla_id>/approve/", cartilla_approve, name="mina_cartilla_approve"),

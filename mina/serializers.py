@@ -16,6 +16,7 @@ from .models import (
     CartillaPersonal,
     CartillaWorkflowLog,
 )
+from .workflow import get_available_cartilla_actions
 
 
 class EmbeddedCatalogSerializer(serializers.Serializer):
@@ -64,6 +65,7 @@ class CartillaMinaListSerializer(serializers.ModelSerializer):
     estadoWorkflow = serializers.CharField(source="estado_workflow", read_only=True)
     syncStatus = serializers.CharField(source="sync_status", read_only=True)
     attachmentsCount = serializers.IntegerField(source="attachments_count", read_only=True)
+    availableActions = serializers.SerializerMethodField()
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
 
@@ -85,9 +87,16 @@ class CartillaMinaListSerializer(serializers.ModelSerializer):
             "estadoWorkflow",
             "syncStatus",
             "attachmentsCount",
+            "availableActions",
             "createdAt",
             "updatedAt",
         )
+
+    def get_availableActions(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user or not request.user.is_authenticated:
+            return {}
+        return get_available_cartilla_actions(obj, request.user)
 
 
 class PerforacionExplosivoSerializer(serializers.ModelSerializer):
@@ -329,6 +338,9 @@ class CartillaMinaDetailSerializer(CartillaMinaListSerializer):
         many=True,
         read_only=True,
     )
+    submittedAt = serializers.DateTimeField(source="submitted_at", read_only=True)
+    reviewedAt = serializers.DateTimeField(source="reviewed_at", read_only=True)
+    closedAt = serializers.DateTimeField(source="closed_at", read_only=True)
 
     class Meta(CartillaMinaListSerializer.Meta):
         fields = CartillaMinaListSerializer.Meta.fields + (
@@ -346,6 +358,9 @@ class CartillaMinaDetailSerializer(CartillaMinaListSerializer):
             "accionesCorrectivas",
             "attachments",
             "workflowLogs",
+            "submittedAt",
+            "reviewedAt",
+            "closedAt",
         )
 
     def get_dataJson(self, obj):
@@ -375,3 +390,201 @@ class CartillaMinaDetailSerializer(CartillaMinaListSerializer):
             many=True,
             context=self.context,
         ).data
+
+
+def _catalog_name(obj):
+    if obj is None:
+        return ""
+    return (
+        getattr(obj, "nombre", "")
+        or getattr(obj, "razon_social", "")
+        or getattr(obj, "titulo", "")
+        or str(obj)
+    )
+
+
+def _parse_data_json(obj):
+    raw = obj.data_json or "{}"
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}, ["data_json no contiene JSON valido."]
+    if not isinstance(parsed, dict):
+        return {}, ["data_json debe ser un objeto JSON."]
+    return parsed, []
+
+
+def _active_attachments(obj):
+    return [
+        attachment
+        for attachment in obj.attachments.all()
+        if attachment.deleted_at is None
+    ]
+
+
+def _count_related(obj, related_name):
+    manager = getattr(obj, related_name)
+    if hasattr(manager, "all"):
+        return len(manager.all())
+    return 0
+
+
+def _table_snapshot_warnings(snapshot, counts):
+    warnings = []
+    module_map = {
+        "perforacionVoladura": "perforacionVoladura",
+        "extraccionAcarreo": "extraccionAcarreo",
+        "personal": "personal",
+        "equipos": "equipos",
+        "avances": "avances",
+        "accionesCorrectivas": "accionesCorrectivas",
+    }
+    for snapshot_key, count_key in module_map.items():
+        snapshot_rows = snapshot.get(snapshot_key, [])
+        if snapshot_rows in (None, ""):
+            snapshot_rows = []
+        if isinstance(snapshot_rows, list) and len(snapshot_rows) != counts[count_key]:
+            warnings.append(
+                (
+                    f"{snapshot_key}: dataJson tiene {len(snapshot_rows)} filas "
+                    f"y tablas reportables tienen {counts[count_key]}."
+                ),
+            )
+    return warnings
+
+
+class CartillaMinaSummarySerializer(serializers.ModelSerializer):
+    clientRecordId = serializers.CharField(source="client_record_id", read_only=True)
+    fechaOperacion = serializers.DateField(source="fecha_operacion", read_only=True)
+    turno = serializers.SerializerMethodField()
+    guardia = serializers.SerializerMethodField()
+    area = serializers.SerializerMethodField()
+    estadoWorkflow = serializers.CharField(source="estado_workflow", read_only=True)
+    syncStatus = serializers.CharField(source="sync_status", read_only=True)
+    counts = serializers.SerializerMethodField()
+    availableActions = serializers.SerializerMethodField()
+    updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
+
+    class Meta:
+        model = CartillaOperacionMina
+        fields = (
+            "id",
+            "clientRecordId",
+            "fechaOperacion",
+            "turno",
+            "guardia",
+            "area",
+            "estadoWorkflow",
+            "syncStatus",
+            "counts",
+            "availableActions",
+            "updatedAt",
+        )
+
+    def get_turno(self, obj):
+        return _catalog_name(obj.turno)
+
+    def get_guardia(self, obj):
+        return _catalog_name(obj.guardia)
+
+    def get_area(self, obj):
+        return _catalog_name(obj.area)
+
+    def get_counts(self, obj):
+        return {
+            "perforacionVoladura": _count_related(obj, "perforaciones_voladura"),
+            "extraccionAcarreo": _count_related(obj, "extracciones_acarreo"),
+            "personal": _count_related(obj, "personal"),
+            "equipos": _count_related(obj, "equipos"),
+            "avances": _count_related(obj, "avances"),
+            "accionesCorrectivas": _count_related(obj, "acciones_correctivas"),
+            "attachments": len(_active_attachments(obj)),
+        }
+
+    def get_availableActions(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user or not request.user.is_authenticated:
+            return {}
+        return get_available_cartilla_actions(obj, request.user)
+
+
+class CartillaMinaRenderDataSerializer(serializers.Serializer):
+    def to_representation(self, obj):
+        snapshot, warnings = _parse_data_json(obj)
+        counts = CartillaMinaSummarySerializer(
+            obj,
+            context=self.context,
+        ).data["counts"]
+        warnings.extend(_table_snapshot_warnings(snapshot, counts))
+
+        header = {
+            "fechaOperacion": obj.fecha_operacion,
+            "tipoCartilla": EmbeddedTipoCartillaSerializer(obj.tipo_cartilla).data,
+            "turno": EmbeddedCatalogSerializer(obj.turno).data,
+            "guardia": EmbeddedCatalogSerializer(obj.guardia).data,
+            "area": EmbeddedCatalogSerializer(obj.area).data,
+            "zona": EmbeddedCatalogSerializer(obj.zona).data if obj.zona_id else None,
+            "nivel": EmbeddedCatalogSerializer(obj.nivel).data if obj.nivel_id else None,
+            "ingenieroMinero": (
+                EmbeddedTrabajadorSerializer(obj.ingeniero_minero).data
+                if obj.ingeniero_minero_id
+                else None
+            ),
+            "supervisor": (
+                EmbeddedTrabajadorSerializer(obj.supervisor).data
+                if obj.supervisor_id
+                else None
+            ),
+            "clima": EmbeddedCatalogSerializer(obj.clima).data if obj.clima_id else None,
+            "estadoWorkflow": obj.estado_workflow,
+            "syncStatus": obj.sync_status,
+            "submittedAt": obj.submitted_at,
+            "reviewedAt": obj.reviewed_at,
+            "closedAt": obj.closed_at,
+        }
+
+        modules = {
+            "datosGenerales": snapshot.get("datosGenerales", {}),
+            "perforacionVoladura": PerforacionVoladuraSerializer(
+                obj.perforaciones_voladura.all(),
+                many=True,
+            ).data,
+            "extraccionAcarreo": ExtraccionAcarreoSerializer(
+                obj.extracciones_acarreo.all(),
+                many=True,
+            ).data,
+            "personal": PersonalSerializer(obj.personal.all(), many=True).data,
+            "equipos": EquipoSerializer(obj.equipos.all(), many=True).data,
+            "avances": AvanceSerializer(obj.avances.all(), many=True).data,
+            "accionesCorrectivas": AccionCorrectivaSerializer(
+                obj.acciones_correctivas.all(),
+                many=True,
+            ).data,
+            "observaciones": snapshot.get("observaciones", []),
+            "firmas": snapshot.get("firmas", []),
+        }
+
+        request = self.context.get("request")
+        available_actions = (
+            get_available_cartilla_actions(obj, request.user)
+            if request and request.user and request.user.is_authenticated
+            else {}
+        )
+
+        return {
+            "id": obj.pk,
+            "clientRecordId": obj.client_record_id,
+            "header": header,
+            "modules": modules,
+            "attachments": AttachmentSerializer(
+                _active_attachments(obj),
+                many=True,
+                context=self.context,
+            ).data,
+            "workflowLogs": WorkflowLogSerializer(
+                obj.workflow_logs.all(),
+                many=True,
+            ).data,
+            "availableActions": available_actions,
+            "warnings": warnings,
+        }
