@@ -1,10 +1,10 @@
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import LoginSerializer
+from .serializers import CurrentUserSerializer, LoginSerializer
 
 
 @api_view(["GET"])
@@ -24,18 +24,9 @@ def login_view(request):
 
     return Response(
         {
-            "access_token": str(refresh.access_token),
-            "refresh_token": str(refresh),
-            "user": {
-                "id": user.id,
-                "username": user.username,
-                "full_name": user.get_full_name(),
-                "email": user.email,
-                "is_staff": user.is_staff,
-                "is_superuser": user.is_superuser,
-                "dni": user.dni,
-                "phone": user.phone,
-            },
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": CurrentUserSerializer(user).data,
         },
         status=status.HTTP_200_OK,
     )
@@ -60,4 +51,10 @@ def refresh_view(request):
             status=status.HTTP_401_UNAUTHORIZED,
         )
 
-    return Response({"access_token": str(refresh.access_token)})
+    return Response({"access": str(refresh.access_token)})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def me_view(request):
+    return Response(CurrentUserSerializer(request.user).data)
