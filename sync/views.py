@@ -47,6 +47,11 @@ from catalogos.serializers import (
     UnidadMedidaSerializer,
     ZonaSerializer,
 )
+from sync.mina_sync import MinaCartillaSyncService
+from sync.serializers import (
+    CartillaOperacionMinaSyncRequestSerializer,
+    CartillaOperacionMinaSyncResponseSerializer,
+)
 
 
 CATALOG_BOOTSTRAP = {
@@ -133,3 +138,17 @@ def mobile_bootstrap(request):
             "catalogos": catalog_payload(updated_since=updated_since),
         }
     )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def sync_cartilla_operacion_mina(request):
+    serializer = CartillaOperacionMinaSyncRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    result = MinaCartillaSyncService(
+        user=request.user,
+        validated_data=serializer.validated_data,
+    ).sync()
+    response = CartillaOperacionMinaSyncResponseSerializer(result)
+    return Response(response.data)
