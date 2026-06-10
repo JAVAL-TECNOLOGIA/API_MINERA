@@ -71,6 +71,14 @@ def _odbc_extra_params() -> str:
     return ";".join(params)
 
 
+def _should_inline_null_params(driver: str) -> bool:
+    value = _env("DB_INLINE_NULL_PARAMS", "auto").lower()
+    if value == "auto":
+        normalized_driver = driver.lower()
+        return "tdsodbc" in normalized_driver or "freetds" in normalized_driver
+    return value in {"1", "true", "yes", "y", "on"}
+
+
 def _database_config() -> dict:
     engine = _env("DB_ENGINE", "mssql")
     name = _env("DB_NAME", "cartillas_operaciones_mina")
@@ -85,8 +93,15 @@ def _database_config() -> dict:
     server_format = _env("DB_SERVER_FORMAT")
     connection_timeout = _env_int("DB_CONNECTION_TIMEOUT", 0)
 
+    driver = _env("DB_DRIVER", "ODBC Driver 17 for SQL Server")
+    resolved_engine = (
+        "core.db.backends.mssql_freetds"
+        if engine == "mssql" and _should_inline_null_params(driver)
+        else engine
+    )
+
     config = {
-        "ENGINE": engine,
+        "ENGINE": resolved_engine,
         "NAME": name,
         "HOST": server_format or _env("DB_HOST", "localhost"),
         "PORT": "" if server_format else _env("DB_PORT", "1433"),
@@ -94,7 +109,6 @@ def _database_config() -> dict:
         "PASSWORD": _env("DB_PASSWORD"),
     }
 
-    driver = _env("DB_DRIVER", "ODBC Driver 17 for SQL Server")
     options = {}
     if driver:
         options["driver"] = driver
