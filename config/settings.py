@@ -134,7 +134,7 @@ _load_local_env()
 
 SECRET_KEY = _env("SECRET_KEY", "dev-only-change-me")
 DEBUG = _env_bool("DEBUG", False)
-ALLOWED_HOSTS = _env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
+ALLOWED_HOSTS = _env_list("ALLOWED_HOSTS", "localhost,127.0.0.1,192.168.0.5")
 
 
 INSTALLED_APPS = [
