@@ -15,6 +15,9 @@ from .models import (
     LaborFrente,
     Nivel,
     Producto,
+    RequerimientoProducto,
+    RequerimientoRubro,
+    Sucursal,
     Trabajador,
     Turno,
     UnidadMedida,
@@ -62,6 +65,32 @@ class ProductoSerializer(CatalogoBaseSerializer):
 class UnidadMedidaSerializer(CatalogoBaseSerializer):
     class Meta(CatalogoBaseSerializer.Meta):
         model = UnidadMedida
+
+
+class SucursalSerializer(CatalogoBaseSerializer):
+    class Meta(CatalogoBaseSerializer.Meta):
+        model = Sucursal
+
+
+class RequerimientoRubroSerializer(CatalogoBaseSerializer):
+    class Meta(CatalogoBaseSerializer.Meta):
+        model = RequerimientoRubro
+
+
+class RequerimientoProductoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RequerimientoProducto
+        fields = (
+            "id",
+            "codigo",
+            "nombre",
+            "descripcion",
+            "seccion",
+            "rubro_id",
+            "unidad_medida_id",
+            "is_active",
+            "updated_at",
+        )
 
 
 class TurnoSerializer(serializers.ModelSerializer):

@@ -84,8 +84,32 @@ UNIDADES_MEDIDA = [
     {"codigo": "M", "nombre": "Metro", "descripcion": "Medida en metros."},
     {"codigo": "KG", "nombre": "Kilogramo", "descripcion": "Medida en kilogramos."},
     {"codigo": "UND", "nombre": "Unidad", "descripcion": "Conteo por unidad."},
+    {"codigo": "L", "nombre": "Litro", "descripcion": "Medida en litros."},
 ]
 
+SUCURSALES = [
+    {
+        "codigo": "MINA_CAROLINA_JE",
+        "nombre": "Mina Carolina JE.",
+        "descripcion": "Sucursal Mina Carolina JE.",
+    },
+]
+
+REQUERIMIENTO_RUBROS = [
+    {"codigo": "HERRAMIENTA", "nombre": "Herramienta", "descripcion": "Herramientas."},
+    {"codigo": "ACCESORIO", "nombre": "Accesorio", "descripcion": "Accesorios."},
+    {"codigo": "REPUESTO", "nombre": "Repuesto", "descripcion": "Repuestos."},
+    {"codigo": "EPP", "nombre": "EPP", "descripcion": "Equipo de proteccion personal."},
+]
+
+REQUERIMIENTO_PRODUCTOS = [
+    ("COMBA_4_LB", "Comba de 4 lbs.", "herramientas_otros", "HERRAMIENTA", "UND"),
+    ("CHALONA", "Chalona", "herramientas_otros", "ACCESORIO", "UND"),
+    ("ACEITE", "Aceite", "herramientas_otros", "REPUESTO", "L"),
+    ("PANTALON_PERFORAR", "Pantalon para perforar", "equipo_proteccion_personal", "EPP", "UND"),
+    ("BUZO_REFLECTIVO", "Buzo con cinta reflectiva", "equipo_proteccion_personal", "EPP", "UND"),
+    ("POLO_REFLECTIVO", "Polo manga larga con cinta reflectiva", "equipo_proteccion_personal", "EPP", "UND"),
+]
 
 CLIMAS = [
     {"codigo": "SOLEADO", "nombre": "Soleado", "descripcion": "Clima soleado."},
@@ -110,6 +134,27 @@ CARTILLA_SCHEMA = {
         {"key": "firmas", "title": "Firmas y cierre"},
     ],
 }
+
+CARTILLA_TYPES = [
+    (
+        "CARTILLA_OPERACION_MINA",
+        "Cartilla diaria de operacion mina",
+        "Cartilla diaria/por turno para operaciones de mina subterranea",
+        CARTILLA_SCHEMA,
+    ),
+    (
+        "CARTILLA_REQUERIMIENTO_PRODUCTOS",
+        "Cartilla de requerimiento de productos",
+        "Solicitud de herramientas, accesorios, repuestos y EPP por sucursal.",
+        {
+            "sections": [
+                "datosGenerales",
+                "herramientasOtros",
+                "equipoProteccionPersonal",
+            ],
+        },
+    ),
+]
 
 
 class Command(BaseCommand):
@@ -141,8 +186,14 @@ class Command(BaseCommand):
                 "catalogos_unidadmedida",
                 UNIDADES_MEDIDA,
             ),
+            "sucursales": self._seed_catalog("catalogos_sucursal", SUCURSALES),
+            "requerimiento_rubros": self._seed_catalog(
+                "catalogos_requerimientorubro",
+                REQUERIMIENTO_RUBROS,
+            ),
+            "requerimiento_productos": self._seed_requerimiento_productos(),
             "climas": self._seed_catalog("catalogos_clima", CLIMAS),
-            "tipo_cartilla": self._seed_tipo_cartilla(),
+            "tipos_cartilla": self._seed_tipo_cartilla(),
             "admin_user": self._seed_admin_user(options),
         }
 
@@ -224,33 +275,72 @@ class Command(BaseCommand):
             result["updated" if existed else "created"] += 1
         return result
 
+    def _seed_requerimiento_productos(self):
+        result = {"created": 0, "updated": 0}
+        for codigo, nombre, seccion, rubro_codigo, unidad_codigo in REQUERIMIENTO_PRODUCTOS:
+            existed = self._exists("catalogos_requerimientoproducto", "codigo", codigo)
+            self._execute(
+                f"""
+                DECLARE @rubro_id bigint =
+                    (SELECT TOP 1 id FROM catalogos_requerimientorubro
+                     WHERE codigo = {self._q(rubro_codigo)});
+                DECLARE @unidad_id bigint =
+                    (SELECT TOP 1 id FROM catalogos_unidadmedida
+                     WHERE codigo = {self._q(unidad_codigo)});
+
+                IF EXISTS (
+                    SELECT 1 FROM catalogos_requerimientoproducto
+                    WHERE codigo = {self._q(codigo)}
+                )
+                    UPDATE catalogos_requerimientoproducto
+                    SET nombre = {self._q(nombre)},
+                        descripcion = {self._q(nombre)},
+                        seccion = {self._q(seccion)},
+                        rubro_id = @rubro_id,
+                        unidad_medida_id = @unidad_id,
+                        is_active = 1,
+                        updated_at = GETDATE()
+                    WHERE codigo = {self._q(codigo)}
+                ELSE
+                    INSERT INTO catalogos_requerimientoproducto
+                        (created_at, updated_at, deleted_at, is_active, codigo,
+                         nombre, descripcion, seccion, rubro_id, unidad_medida_id)
+                    VALUES
+                        (GETDATE(), GETDATE(), NULL, 1, {self._q(codigo)},
+                         {self._q(nombre)}, {self._q(nombre)}, {self._q(seccion)},
+                         @rubro_id, @unidad_id)
+                """
+            )
+            result["updated" if existed else "created"] += 1
+        return result
+
     def _seed_tipo_cartilla(self):
-        codigo = "CARTILLA_OPERACION_MINA"
-        nombre = "Cartilla diaria de operacion mina"
-        descripcion = "Cartilla diaria/por turno para operaciones de mina subterranea"
-        schema_json = json.dumps(CARTILLA_SCHEMA, ensure_ascii=False)
-        existed = self._exists("cartillas_tipocartilla", "codigo", codigo)
-        self._execute(
-            f"""
-            IF EXISTS (SELECT 1 FROM cartillas_tipocartilla WHERE codigo = {self._q(codigo)})
-                UPDATE cartillas_tipocartilla
-                SET nombre = {self._q(nombre)},
-                    descripcion = {self._q(descripcion)},
-                    version = 1,
-                    schema_json = {self._q(schema_json)},
-                    is_active = 1,
-                    updated_at = GETDATE()
-                WHERE codigo = {self._q(codigo)}
-            ELSE
-                INSERT INTO cartillas_tipocartilla
-                    (created_at, updated_at, deleted_at, is_active, codigo,
-                     nombre, descripcion, version, schema_json)
-                VALUES
-                    (GETDATE(), GETDATE(), NULL, 1, {self._q(codigo)},
-                     {self._q(nombre)}, {self._q(descripcion)}, 1, {self._q(schema_json)})
-            """
-        )
-        return {"created": int(not existed), "updated": int(existed)}
+        result = {"created": 0, "updated": 0}
+        for codigo, nombre, descripcion, schema in CARTILLA_TYPES:
+            schema_json = json.dumps(schema, ensure_ascii=False)
+            existed = self._exists("cartillas_tipocartilla", "codigo", codigo)
+            self._execute(
+                f"""
+                IF EXISTS (SELECT 1 FROM cartillas_tipocartilla WHERE codigo = {self._q(codigo)})
+                    UPDATE cartillas_tipocartilla
+                    SET nombre = {self._q(nombre)},
+                        descripcion = {self._q(descripcion)},
+                        version = 1,
+                        schema_json = {self._q(schema_json)},
+                        is_active = 1,
+                        updated_at = GETDATE()
+                    WHERE codigo = {self._q(codigo)}
+                ELSE
+                    INSERT INTO cartillas_tipocartilla
+                        (created_at, updated_at, deleted_at, is_active, codigo,
+                         nombre, descripcion, version, schema_json)
+                    VALUES
+                        (GETDATE(), GETDATE(), NULL, 1, {self._q(codigo)},
+                         {self._q(nombre)}, {self._q(descripcion)}, 1, {self._q(schema_json)})
+                """
+            )
+            result["updated" if existed else "created"] += 1
+        return result
 
     def _seed_admin_user(self, options):
         username = options["admin_username"].strip()

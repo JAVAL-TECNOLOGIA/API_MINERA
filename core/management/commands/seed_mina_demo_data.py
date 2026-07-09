@@ -24,6 +24,9 @@ from catalogos.models import (
     LaborFrente,
     Nivel,
     Producto,
+    RequerimientoProducto,
+    RequerimientoRubro,
+    Sucursal,
     Trabajador,
     Turno,
     UnidadMedida,
@@ -33,6 +36,7 @@ from sync.views import catalog_payload
 
 
 CARTILLA_CODE = "CARTILLA_OPERACION_MINA"
+REQUERIMIENTO_CARTILLA_CODE = "CARTILLA_REQUERIMIENTO_PRODUCTOS"
 
 ROLES = [
     ("admin", "Administrador", "Acceso completo a administracion y operacion."),
@@ -72,6 +76,15 @@ CATALOG_BASE = {
         ("SACO", "Saco", "Conteo por saco."),
         ("L", "Litro", "Medida en litros."),
     ],
+    Sucursal: [
+        ("MINA_CAROLINA_JE", "Mina Carolina JE.", "Sucursal Mina Carolina JE."),
+    ],
+    RequerimientoRubro: [
+        ("HERRAMIENTA", "Herramienta", "Herramientas."),
+        ("ACCESORIO", "Accesorio", "Accesorios."),
+        ("REPUESTO", "Repuesto", "Repuestos."),
+        ("EPP", "EPP", "Equipo de proteccion personal."),
+    ],
     Cargo: [
         ("ING_MINERO", "Ingeniero Minero", "Cargo demo Mina."),
         ("SUPERVISOR", "Supervisor", "Cargo demo Mina."),
@@ -85,6 +98,15 @@ CATALOG_BASE = {
         ("SEGURIDAD", "Seguridad", "Cargo demo Mina."),
     ],
 }
+
+REQUERIMIENTO_PRODUCTOS = [
+    ("COMBA_4_LB", "Comba de 4 lbs.", "herramientas_otros", "HERRAMIENTA", "UND"),
+    ("CHALONA", "Chalona", "herramientas_otros", "ACCESORIO", "UND"),
+    ("ACEITE", "Aceite", "herramientas_otros", "REPUESTO", "L"),
+    ("PANTALON_PERFORAR", "Pantalon para perforar", "equipo_proteccion_personal", "EPP", "UND"),
+    ("BUZO_REFLECTIVO", "Buzo con cinta reflectiva", "equipo_proteccion_personal", "EPP", "UND"),
+    ("POLO_REFLECTIVO", "Polo manga larga con cinta reflectiva", "equipo_proteccion_personal", "EPP", "UND"),
+]
 
 TURNOS = [
     ("DIA", "Dia", time(7, 0), time(19, 0), False),
@@ -239,6 +261,9 @@ class Command(BaseCommand):
                 "climas": self._seed_catalog_base(Clima),
                 "productos": self._seed_catalog_base(Producto),
                 "unidades_medida": self._seed_catalog_base(UnidadMedida),
+                "sucursales": self._seed_catalog_base(Sucursal),
+                "requerimiento_rubros": self._seed_catalog_base(RequerimientoRubro),
+                "requerimiento_productos": self._seed_requerimiento_productos(),
                 "empresas": self._seed_empresas(),
                 "cargos": self._seed_catalog_base(Cargo),
                 "trabajadores": self._seed_trabajadores(),
@@ -614,7 +639,38 @@ class Command(BaseCommand):
             result.add(created)
         return result.as_dict()
 
+    def _seed_requerimiento_productos(self):
+        rubros = {
+            rubro.codigo: rubro
+            for rubro in RequerimientoRubro.objects.filter(
+                codigo__in=[row[3] for row in REQUERIMIENTO_PRODUCTOS],
+            )
+        }
+        unidades = {
+            unidad.codigo: unidad
+            for unidad in UnidadMedida.objects.filter(
+                codigo__in=[row[4] for row in REQUERIMIENTO_PRODUCTOS],
+            )
+        }
+        result = Counter()
+        for codigo, nombre, seccion, rubro_codigo, unidad_codigo in REQUERIMIENTO_PRODUCTOS:
+            _, created = RequerimientoProducto.objects.update_or_create(
+                codigo=codigo,
+                defaults={
+                    "nombre": nombre,
+                    "descripcion": nombre,
+                    "seccion": seccion,
+                    "rubro": rubros[rubro_codigo],
+                    "unidad_medida": unidades[unidad_codigo],
+                    "is_active": True,
+                    "deleted_at": None,
+                },
+            )
+            result.add(created)
+        return result.as_dict()
+
     def _seed_tipo_cartilla(self):
+        result = Counter()
         _, created = TipoCartilla.objects.update_or_create(
             codigo=CARTILLA_CODE,
             defaults={
@@ -626,7 +682,29 @@ class Command(BaseCommand):
                 "deleted_at": None,
             },
         )
-        return Counter(created=created).as_dict()
+        result.add(created)
+        _, created = TipoCartilla.objects.update_or_create(
+            codigo=REQUERIMIENTO_CARTILLA_CODE,
+            defaults={
+                "nombre": "Cartilla de requerimiento de productos",
+                "descripcion": "Solicitud de herramientas, accesorios, repuestos y EPP por sucursal.",
+                "version": 1,
+                "schema_json": json.dumps(
+                    {
+                        "sections": [
+                            "datosGenerales",
+                            "herramientasOtros",
+                            "equipoProteccionPersonal",
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                "is_active": True,
+                "deleted_at": None,
+            },
+        )
+        result.add(created)
+        return result.as_dict()
 
     def _seed_user(self, options):
         if not options["with_user"]:
@@ -698,19 +776,24 @@ class Command(BaseCommand):
             )
             return None
 
-        tipo_cartilla = TipoCartilla.objects.get(codigo=CARTILLA_CODE)
-        assignment, created = AsignacionCartillaUsuario.objects.get_or_create(
-            user=user,
-            tipo_cartilla=tipo_cartilla,
-            defaults={"estado": AsignacionCartillaUsuario.ESTADO_ACTIVO},
+        tipos = TipoCartilla.objects.filter(
+            codigo__in=[CARTILLA_CODE, REQUERIMIENTO_CARTILLA_CODE],
         )
-        assignment.estado = AsignacionCartillaUsuario.ESTADO_ACTIVO
-        assignment.deleted_at = None
-        assignment.save()
+        created_any = False
+        for tipo_cartilla in tipos:
+            assignment, created = AsignacionCartillaUsuario.objects.get_or_create(
+                user=user,
+                tipo_cartilla=tipo_cartilla,
+                defaults={"estado": AsignacionCartillaUsuario.ESTADO_ACTIVO},
+            )
+            assignment.estado = AsignacionCartillaUsuario.ESTADO_ACTIVO
+            assignment.deleted_at = None
+            assignment.save()
+            created_any = created_any or created
         return {
             "username": user.username,
-            "cartilla": tipo_cartilla.codigo,
-            "created": created,
+            "cartilla": ", ".join(tipos.values_list("codigo", flat=True)),
+            "created": created_any,
         }
 
     def _reset_demo_relations(self):

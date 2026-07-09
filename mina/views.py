@@ -17,6 +17,7 @@ from .models import (
     CartillaOperacionMina,
     CartillaPerforacionVoladura,
     CartillaPersonal,
+    CartillaRequerimientoProductoDetalle,
     CartillaWorkflowLog,
 )
 from .serializers import (
@@ -57,6 +58,8 @@ def _base_cartilla_queryset():
             "ingeniero_minero",
             "supervisor",
             "clima",
+            "sucursal",
+            "responsable_requerimiento",
         )
         .prefetch_related(
             Prefetch(
@@ -101,6 +104,14 @@ def _base_cartilla_queryset():
                 queryset=CartillaAccionCorrectiva.objects.select_related("responsable"),
             ),
             Prefetch(
+                "requerimiento_productos",
+                queryset=CartillaRequerimientoProductoDetalle.objects.select_related(
+                    "rubro",
+                    "producto",
+                    "unidad_medida",
+                ),
+            ),
+            Prefetch(
                 "attachments",
                 queryset=Attachment.objects.filter(deleted_at__isnull=True),
             ),
@@ -142,9 +153,11 @@ def _apply_filters(queryset, request):
             queryset = queryset.filter(**{lookup: parsed})
 
     exact_filters = {
+        "tipo_cartilla": "tipo_cartilla__codigo",
         "turno_id": "turno_id",
         "guardia_id": "guardia_id",
         "area_id": "area_id",
+        "sucursal_id": "sucursal_id",
         "estado_workflow": "estado_workflow",
         "sync_status": "sync_status",
     }

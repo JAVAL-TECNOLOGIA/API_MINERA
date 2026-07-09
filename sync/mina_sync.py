@@ -15,6 +15,8 @@ from catalogos.models import (
     InsumoAccesorio,
     LaborFrente,
     Producto,
+    RequerimientoProducto,
+    RequerimientoRubro,
     Trabajador,
     UnidadMedida,
 )
@@ -28,7 +30,15 @@ from mina.models import (
     CartillaPerforacionInsumo,
     CartillaPerforacionVoladura,
     CartillaPersonal,
+    CartillaRequerimientoProductoDetalle,
 )
+from sync.serializers import CARTILLA_REQUERIMIENTO_PRODUCTOS
+
+
+REQUERIMIENTO_SECTION_MAP = {
+    "herramientasOtros": CartillaRequerimientoProductoDetalle.SECCION_HERRAMIENTAS,
+    "equipoProteccionPersonal": CartillaRequerimientoProductoDetalle.SECCION_EPP,
+}
 
 
 class MinaCartillaSyncService:
@@ -74,6 +84,8 @@ class MinaCartillaSyncService:
         cartilla.ingeniero_minero = self.data.get("ingeniero_minero")
         cartilla.supervisor = self.data.get("supervisor")
         cartilla.clima = self.data.get("clima")
+        cartilla.sucursal = self.data.get("sucursal")
+        cartilla.responsable_requerimiento = self.data.get("responsable_requerimiento")
         cartilla.estado_workflow = self.data["estado"]
         cartilla.sync_status = CartillaOperacionMina.SYNC_SYNCED
         cartilla.sync_error = ""
@@ -94,6 +106,10 @@ class MinaCartillaSyncService:
         self._delete_existing_children(cartilla)
         data_json = self.data["dataJson"]
 
+        if self.data["cartillaType"] == CARTILLA_REQUERIMIENTO_PRODUCTOS:
+            self._create_requerimiento_productos(cartilla, data_json)
+            return
+
         self._create_perforaciones(cartilla, data_json.get("perforacionVoladura", []))
         self._create_extracciones(cartilla, data_json.get("extraccionAcarreo", []))
         self._create_personal(cartilla, data_json.get("personal", []))
@@ -108,6 +124,56 @@ class MinaCartillaSyncService:
         cartilla.equipos.all().delete()
         cartilla.avances.all().delete()
         cartilla.acciones_correctivas.all().delete()
+        cartilla.requerimiento_productos.all().delete()
+
+    def _create_requerimiento_productos(self, cartilla, data_json):
+        for module_key, seccion in REQUERIMIENTO_SECTION_MAP.items():
+            for index, row in enumerate(self._rows(data_json.get(module_key, []))):
+                missing = self._missing_required(
+                    row,
+                    (
+                        "fecha",
+                        "rubroId",
+                        "productoId",
+                        "cantidad",
+                        "unidadMedidaId",
+                        "prioridad",
+                    ),
+                )
+                if missing:
+                    self._handle_incomplete_row(module_key, index, missing)
+                    continue
+
+                CartillaRequerimientoProductoDetalle.objects.create(
+                    cartilla=cartilla,
+                    row_key=row["rowKey"],
+                    seccion=seccion,
+                    fecha=self._date(row["fecha"]),
+                    rubro=self._catalog(
+                        RequerimientoRubro,
+                        row["rubroId"],
+                        module_key,
+                        index,
+                        "rubroId",
+                    ),
+                    producto=self._catalog(
+                        RequerimientoProducto,
+                        row["productoId"],
+                        module_key,
+                        index,
+                        "productoId",
+                    ),
+                    descripcion=row.get("descripcion", "") or "",
+                    cantidad=self._decimal(row["cantidad"], "cantidad"),
+                    unidad_medida=self._catalog(
+                        UnidadMedida,
+                        row["unidadMedidaId"],
+                        module_key,
+                        index,
+                        "unidadMedidaId",
+                    ),
+                    prioridad=row["prioridad"],
+                )
 
     def _create_perforaciones(self, cartilla, rows):
         for index, row in enumerate(self._rows(rows)):
@@ -429,4 +495,10 @@ class MinaCartillaSyncService:
         parsed = parse_date(str(value))
         if parsed is None:
             raise serializers.ValidationError({"dataJson": f"Fecha invalida: {value}."})
+        return parsed
+
+    def _date(self, value):
+        parsed = self._optional_date(value)
+        if parsed is None:
+            raise serializers.ValidationError({"dataJson": "Fecha invalida."})
         return parsed

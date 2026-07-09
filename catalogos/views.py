@@ -17,6 +17,9 @@ from .models import (
     LaborFrente,
     Nivel,
     Producto,
+    RequerimientoProducto,
+    RequerimientoRubro,
+    Sucursal,
     Trabajador,
     Turno,
     UnidadMedida,
@@ -37,6 +40,9 @@ from .serializers import (
     LaborSerializer,
     NivelSerializer,
     ProductoSerializer,
+    RequerimientoProductoSerializer,
+    RequerimientoRubroSerializer,
+    SucursalSerializer,
     TrabajadorSerializer,
     TurnoSerializer,
     UnidadMedidaSerializer,
@@ -147,6 +153,22 @@ class ProductoViewSet(ActiveCatalogViewSet):
 class UnidadMedidaViewSet(ActiveCatalogViewSet):
     queryset = UnidadMedida.objects.all()
     serializer_class = UnidadMedidaSerializer
+
+
+class SucursalViewSet(ActiveCatalogViewSet):
+    queryset = Sucursal.objects.all()
+    serializer_class = SucursalSerializer
+
+
+class RequerimientoRubroViewSet(ActiveCatalogViewSet):
+    queryset = RequerimientoRubro.objects.all()
+    serializer_class = RequerimientoRubroSerializer
+
+
+class RequerimientoProductoViewSet(ActiveCatalogViewSet):
+    queryset = RequerimientoProducto.objects.select_related("rubro", "unidad_medida")
+    serializer_class = RequerimientoProductoSerializer
+    ordering = ("seccion", "nombre", "codigo")
 
 
 class ExplosivoViewSet(ActiveCatalogViewSet):

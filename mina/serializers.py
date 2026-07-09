@@ -14,6 +14,7 @@ from .models import (
     CartillaPerforacionInsumo,
     CartillaPerforacionVoladura,
     CartillaPersonal,
+    CartillaRequerimientoProductoDetalle,
     CartillaWorkflowLog,
 )
 from .workflow import get_available_cartilla_actions
@@ -62,6 +63,11 @@ class CartillaMinaListSerializer(serializers.ModelSerializer):
     )
     supervisor = EmbeddedTrabajadorSerializer(read_only=True)
     clima = EmbeddedCatalogSerializer(read_only=True)
+    sucursal = EmbeddedCatalogSerializer(read_only=True)
+    responsableRequerimiento = EmbeddedTrabajadorSerializer(
+        source="responsable_requerimiento",
+        read_only=True,
+    )
     estadoWorkflow = serializers.CharField(source="estado_workflow", read_only=True)
     syncStatus = serializers.CharField(source="sync_status", read_only=True)
     attachmentsCount = serializers.IntegerField(source="attachments_count", read_only=True)
@@ -84,6 +90,8 @@ class CartillaMinaListSerializer(serializers.ModelSerializer):
             "ingenieroMinero",
             "supervisor",
             "clima",
+            "sucursal",
+            "responsableRequerimiento",
             "estadoWorkflow",
             "syncStatus",
             "attachmentsCount",
@@ -296,6 +304,27 @@ class AccionCorrectivaSerializer(serializers.ModelSerializer):
         )
 
 
+class RequerimientoProductoDetalleSerializer(serializers.ModelSerializer):
+    rubro = EmbeddedCatalogSerializer(read_only=True)
+    producto = EmbeddedCatalogSerializer(read_only=True)
+    unidadMedida = EmbeddedCatalogSerializer(source="unidad_medida", read_only=True)
+
+    class Meta:
+        model = CartillaRequerimientoProductoDetalle
+        fields = (
+            "id",
+            "row_key",
+            "seccion",
+            "fecha",
+            "rubro",
+            "producto",
+            "descripcion",
+            "cantidad",
+            "unidadMedida",
+            "prioridad",
+        )
+
+
 class WorkflowLogSerializer(serializers.ModelSerializer):
     fromState = serializers.CharField(source="from_state", read_only=True)
     toState = serializers.CharField(source="to_state", read_only=True)
@@ -332,6 +361,11 @@ class CartillaMinaDetailSerializer(CartillaMinaListSerializer):
         many=True,
         read_only=True,
     )
+    requerimientoProductos = RequerimientoProductoDetalleSerializer(
+        source="requerimiento_productos",
+        many=True,
+        read_only=True,
+    )
     attachments = serializers.SerializerMethodField()
     workflowLogs = WorkflowLogSerializer(
         source="workflow_logs",
@@ -356,6 +390,7 @@ class CartillaMinaDetailSerializer(CartillaMinaListSerializer):
             "equipos",
             "avances",
             "accionesCorrectivas",
+            "requerimientoProductos",
             "attachments",
             "workflowLogs",
             "submittedAt",
@@ -438,6 +473,8 @@ def _table_snapshot_warnings(snapshot, counts):
         "equipos": "equipos",
         "avances": "avances",
         "accionesCorrectivas": "accionesCorrectivas",
+        "herramientasOtros": "herramientasOtros",
+        "equipoProteccionPersonal": "equipoProteccionPersonal",
     }
     for snapshot_key, count_key in module_map.items():
         snapshot_rows = snapshot.get(snapshot_key, [])
@@ -459,6 +496,8 @@ class CartillaMinaSummarySerializer(serializers.ModelSerializer):
     turno = serializers.SerializerMethodField()
     guardia = serializers.SerializerMethodField()
     area = serializers.SerializerMethodField()
+    sucursal = serializers.SerializerMethodField()
+    responsableRequerimiento = serializers.SerializerMethodField()
     estadoWorkflow = serializers.CharField(source="estado_workflow", read_only=True)
     syncStatus = serializers.CharField(source="sync_status", read_only=True)
     counts = serializers.SerializerMethodField()
@@ -474,6 +513,8 @@ class CartillaMinaSummarySerializer(serializers.ModelSerializer):
             "turno",
             "guardia",
             "area",
+            "sucursal",
+            "responsableRequerimiento",
             "estadoWorkflow",
             "syncStatus",
             "counts",
@@ -490,6 +531,14 @@ class CartillaMinaSummarySerializer(serializers.ModelSerializer):
     def get_area(self, obj):
         return _catalog_name(obj.area)
 
+    def get_sucursal(self, obj):
+        return _catalog_name(obj.sucursal)
+
+    def get_responsableRequerimiento(self, obj):
+        if obj.responsable_requerimiento_id:
+            return str(obj.responsable_requerimiento)
+        return ""
+
     def get_counts(self, obj):
         return {
             "perforacionVoladura": _count_related(obj, "perforaciones_voladura"),
@@ -498,6 +547,7 @@ class CartillaMinaSummarySerializer(serializers.ModelSerializer):
             "equipos": _count_related(obj, "equipos"),
             "avances": _count_related(obj, "avances"),
             "accionesCorrectivas": _count_related(obj, "acciones_correctivas"),
+            "requerimientoProductos": _count_related(obj, "requerimiento_productos"),
             "attachments": len(_active_attachments(obj)),
         }
 
@@ -536,6 +586,14 @@ class CartillaMinaRenderDataSerializer(serializers.Serializer):
                 else None
             ),
             "clima": EmbeddedCatalogSerializer(obj.clima).data if obj.clima_id else None,
+            "sucursal": (
+                EmbeddedCatalogSerializer(obj.sucursal).data if obj.sucursal_id else None
+            ),
+            "responsableRequerimiento": (
+                EmbeddedTrabajadorSerializer(obj.responsable_requerimiento).data
+                if obj.responsable_requerimiento_id
+                else None
+            ),
             "estadoWorkflow": obj.estado_workflow,
             "syncStatus": obj.sync_status,
             "submittedAt": obj.submitted_at,
@@ -558,6 +616,18 @@ class CartillaMinaRenderDataSerializer(serializers.Serializer):
             "avances": AvanceSerializer(obj.avances.all(), many=True).data,
             "accionesCorrectivas": AccionCorrectivaSerializer(
                 obj.acciones_correctivas.all(),
+                many=True,
+            ).data,
+            "herramientasOtros": RequerimientoProductoDetalleSerializer(
+                obj.requerimiento_productos.filter(
+                    seccion=CartillaRequerimientoProductoDetalle.SECCION_HERRAMIENTAS,
+                ),
+                many=True,
+            ).data,
+            "equipoProteccionPersonal": RequerimientoProductoDetalleSerializer(
+                obj.requerimiento_productos.filter(
+                    seccion=CartillaRequerimientoProductoDetalle.SECCION_EPP,
+                ),
                 many=True,
             ).data,
             "observaciones": snapshot.get("observaciones", []),
