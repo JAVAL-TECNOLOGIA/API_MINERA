@@ -49,16 +49,22 @@ class CartillaOperacionMina(AuditModel):
         "catalogos.Turno",
         on_delete=models.PROTECT,
         related_name="cartillas_mina",
+        blank=True,
+        null=True,
     )
     guardia = models.ForeignKey(
         "catalogos.Guardia",
         on_delete=models.PROTECT,
         related_name="cartillas_mina",
+        blank=True,
+        null=True,
     )
     area = models.ForeignKey(
         "catalogos.Area",
         on_delete=models.PROTECT,
         related_name="cartillas_mina",
+        blank=True,
+        null=True,
     )
     zona = models.ForeignKey(
         "catalogos.Zona",
@@ -92,6 +98,20 @@ class CartillaOperacionMina(AuditModel):
         "catalogos.Clima",
         on_delete=models.PROTECT,
         related_name="cartillas_mina",
+        blank=True,
+        null=True,
+    )
+    sucursal = models.ForeignKey(
+        "catalogos.Sucursal",
+        on_delete=models.PROTECT,
+        related_name="cartillas_requerimiento_productos",
+        blank=True,
+        null=True,
+    )
+    responsable_requerimiento = models.ForeignKey(
+        "catalogos.Trabajador",
+        on_delete=models.PROTECT,
+        related_name="cartillas_requerimiento_productos",
         blank=True,
         null=True,
     )
@@ -139,7 +159,7 @@ class CartillaOperacionMina(AuditModel):
         ]
 
     def __str__(self) -> str:
-        return f"{self.fecha_operacion} - {self.turno} - {self.user}"
+        return f"{self.fecha_operacion} - {self.tipo_cartilla} - {self.user}"
 
 
 class CartillaPerforacionVoladura(AuditModel):
@@ -496,6 +516,74 @@ class CartillaAccionCorrectiva(AuditModel):
 
     def __str__(self) -> str:
         return f"{self.cartilla} - {self.row_key}"
+
+
+class CartillaRequerimientoProductoDetalle(AuditModel):
+    SECCION_HERRAMIENTAS = "herramientas_otros"
+    SECCION_EPP = "equipo_proteccion_personal"
+
+    SECCION_CHOICES = [
+        (SECCION_HERRAMIENTAS, "Herramientas y/o otros"),
+        (SECCION_EPP, "Equipo de proteccion personal"),
+    ]
+
+    PRIORIDAD_BAJA = "BAJA"
+    PRIORIDAD_ALTA = "ALTA"
+
+    PRIORIDAD_CHOICES = [
+        (PRIORIDAD_BAJA, "Baja"),
+        (PRIORIDAD_ALTA, "Alta"),
+    ]
+
+    cartilla = models.ForeignKey(
+        CartillaOperacionMina,
+        on_delete=models.CASCADE,
+        related_name="requerimiento_productos",
+    )
+    row_key = models.CharField(max_length=64)
+    seccion = models.CharField(max_length=40, choices=SECCION_CHOICES)
+    fecha = models.DateField()
+    rubro = models.ForeignKey(
+        "catalogos.RequerimientoRubro",
+        on_delete=models.PROTECT,
+        related_name="requerimientos_cartilla",
+    )
+    producto = models.ForeignKey(
+        "catalogos.RequerimientoProducto",
+        on_delete=models.PROTECT,
+        related_name="requerimientos_cartilla",
+    )
+    descripcion = models.TextField(blank=True)
+    cantidad = models.DecimalField(max_digits=12, decimal_places=3)
+    unidad_medida = models.ForeignKey(
+        "catalogos.UnidadMedida",
+        on_delete=models.PROTECT,
+        related_name="requerimientos_productos",
+    )
+    prioridad = models.CharField(
+        max_length=10,
+        choices=PRIORIDAD_CHOICES,
+        default=PRIORIDAD_BAJA,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cartilla", "row_key"],
+                name="uq_req_producto_cartilla_row",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["seccion"]),
+            models.Index(fields=["fecha"]),
+            models.Index(fields=["rubro"]),
+            models.Index(fields=["producto"]),
+            models.Index(fields=["prioridad"]),
+            models.Index(fields=["updated_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.cartilla} - {self.seccion} - {self.producto}"
 
 
 class CartillaWorkflowLog(models.Model):

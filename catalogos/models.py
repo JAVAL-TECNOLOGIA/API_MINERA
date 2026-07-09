@@ -259,6 +259,53 @@ class UnidadMedida(CatalogoBase):
     pass
 
 
+class Sucursal(CatalogoBase):
+    pass
+
+
+class RequerimientoRubro(CatalogoBase):
+    pass
+
+
+class RequerimientoProducto(AuditModel):
+    SECCION_HERRAMIENTAS = "herramientas_otros"
+    SECCION_EPP = "equipo_proteccion_personal"
+
+    SECCION_CHOICES = [
+        (SECCION_HERRAMIENTAS, "Herramientas y/o otros"),
+        (SECCION_EPP, "Equipo de proteccion personal"),
+    ]
+
+    codigo = models.CharField(max_length=50, unique=True)
+    nombre = models.CharField(max_length=150)
+    descripcion = models.TextField(blank=True)
+    seccion = models.CharField(max_length=40, choices=SECCION_CHOICES)
+    rubro = models.ForeignKey(
+        RequerimientoRubro,
+        on_delete=models.PROTECT,
+        related_name="productos_requerimiento",
+    )
+    unidad_medida = models.ForeignKey(
+        UnidadMedida,
+        on_delete=models.PROTECT,
+        related_name="productos_requerimiento",
+        blank=True,
+        null=True,
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["codigo"]),
+            models.Index(fields=["seccion"]),
+            models.Index(fields=["rubro"]),
+            models.Index(fields=["is_active"]),
+            models.Index(fields=["updated_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.codigo} - {self.nombre}"
+
+
 class Explosivo(AuditModel):
     codigo = models.CharField(max_length=50, unique=True)
     nombre = models.CharField(max_length=150)

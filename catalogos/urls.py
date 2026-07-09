@@ -16,6 +16,9 @@ from .views import (
     LaborViewSet,
     NivelViewSet,
     ProductoViewSet,
+    RequerimientoProductoViewSet,
+    RequerimientoRubroViewSet,
+    SucursalViewSet,
     TrabajadorViewSet,
     TurnoViewSet,
     UnidadMedidaViewSet,
@@ -46,6 +49,17 @@ router.register(
     basename="catalogos-grupos-perforacion-integrantes",
 )
 router.register("productos", ProductoViewSet, basename="catalogos-productos")
+router.register("sucursales", SucursalViewSet, basename="catalogos-sucursales")
+router.register(
+    "requerimiento-rubros",
+    RequerimientoRubroViewSet,
+    basename="catalogos-requerimiento-rubros",
+)
+router.register(
+    "requerimiento-productos",
+    RequerimientoProductoViewSet,
+    basename="catalogos-requerimiento-productos",
+)
 router.register(
     "unidades-medida",
     UnidadMedidaViewSet,
